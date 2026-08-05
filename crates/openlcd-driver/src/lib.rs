@@ -1,14 +1,15 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+use openlcd_core::{DeviceCapabilities, PixelFormat, RgbaFrame};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub trait DisplayDevice: Send {
+    type Error: std::error::Error + Send + Sync + 'static;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn capabilities(&self) -> &DeviceCapabilities;
+
+    fn send_rgba(&mut self, frame: &RgbaFrame) -> Result<(), Self::Error>;
+
+    fn send_encoded(&mut self, format: PixelFormat, bytes: &[u8]) -> Result<(), Self::Error>;
+
+    fn set_brightness(&mut self, _percent: u8) -> Result<(), Self::Error> {
+        Ok(())
     }
 }

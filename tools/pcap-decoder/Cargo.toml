@@ -1,0 +1,13 @@
+[package]
+name = "pcap-decode"
+version = "0.1.0"
+edition = "2024"
+description = "USBPcap analyzer used during OpenLCD reverse engineering"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

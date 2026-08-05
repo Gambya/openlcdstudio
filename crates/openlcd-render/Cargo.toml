@@ -4,3 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+openlcd-core = { path = "../openlcd-core" }
+image = { version = "0.25", default-features = false, features = [
+    "jpeg",
+    "png",
+] }
+imageproc = "0.25"
+ab_glyph = "0.2"
+thiserror = "2"
+
+[dev-dependencies]
+anyhow = "1"
+kmex-vmax = { path = "../drivers/kmex-vmax" }

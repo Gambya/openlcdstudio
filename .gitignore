@@ -20,6 +20,14 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Reverse-engineering captures and generated analysis
+protocols/**/analysis/
+protocols/**/*.pcap
+protocols/**/*.pcapng
+protocols/**/usbcom.txt
+usbcom.txt
 
-# PCAPNG of network traffic captured during testing
-*.pcapngprotocols/kmex/vmax.pcapng
+# Generated packet and media dumps
+**/packets.jsonl
+**/dumps/
+**/*.partial.jpg

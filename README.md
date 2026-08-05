@@ -1,1 +1,1 @@
-# openlcdstudio
+# Openlcd Studio

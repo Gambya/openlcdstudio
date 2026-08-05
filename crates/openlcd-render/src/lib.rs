@@ -1,14 +1,9 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod error;
+pub mod jpeg;
+pub mod renderer;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use error::{RenderError, Result};
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use jpeg::encode_jpeg;
+
+pub use renderer::{KMEX_FRAME_SIZE, Renderer};
