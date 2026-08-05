@@ -22,4 +22,4 @@ target
 
 
 # PCAPNG of network traffic captured during testing
-*.pcapng
+*.pcapngprotocols/kmex/vmax.pcapng
