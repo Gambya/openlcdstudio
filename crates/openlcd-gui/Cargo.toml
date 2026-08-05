@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+eframe = "0.36"
+openlcd-core = { path = "../openlcd-core" }
+openlcd-driver = { path = "../openlcd-driver" }
+openlcd-fake-driver = { path = "../openlcd-fake-driver" }
+thiserror = "2"
