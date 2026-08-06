@@ -84,6 +84,7 @@ pub struct OpenLcdApp {
 
     scene: Scene,
     cpu_layer_id: LayerId,
+    selected_layer_id: Option<LayerId>,
     font: FontArc,
 }
 
@@ -164,6 +165,7 @@ impl OpenLcdApp {
 
             scene,
             cpu_layer_id,
+            selected_layer_id: Some(cpu_layer_id),
             font,
 
             brightness: 100,
@@ -181,6 +183,154 @@ impl OpenLcdApp {
         app.render_preview(&context.egui_ctx);
 
         app
+    }
+
+    fn properties_panel(&mut self, ui: &mut egui::Ui, context: &egui::Context) {
+        ui.heading("Propriedades");
+
+        let Some(selected_id) = self.selected_layer_id else {
+            ui.label("Nenhuma layer selecionada.");
+
+            return;
+        };
+
+        ui.label(format!("Layer ID: {}", selected_id,));
+
+        ui.separator();
+
+        let is_cpu_layer = selected_id == self.cpu_layer_id;
+
+        let mut changed = false;
+
+        {
+            let Some(layer) = self.scene.layer_mut(selected_id) else {
+                ui.label("Layer não encontrada.");
+
+                return;
+            };
+
+            match layer {
+                Layer::Background(background) => {
+                    ui.label("Tipo: Background");
+
+                    changed |= ui.checkbox(&mut background.visible, "Visível").changed();
+
+                    ui.separator();
+
+                    ui.label("Cor RGBA");
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut background.color[0], 0..=255).text("R"))
+                        .changed();
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut background.color[1], 0..=255).text("G"))
+                        .changed();
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut background.color[2], 0..=255).text("B"))
+                        .changed();
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut background.color[3], 0..=255).text("A"))
+                        .changed();
+                }
+
+                Layer::Text(text) => {
+                    ui.label("Tipo: Text");
+
+                    changed |= ui.checkbox(&mut text.visible, "Visível").changed();
+
+                    ui.separator();
+
+                    if is_cpu_layer {
+                        ui.label("Conteúdo: dinâmico");
+
+                        ui.label(format!("Valor atual: {}", text.text,));
+                    } else {
+                        ui.label("Texto");
+
+                        changed |= ui.text_edit_singleline(&mut text.text).changed();
+                    }
+
+                    ui.separator();
+
+                    ui.label("Posição lógica");
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut text.position.x, 0.0..=1000.0).text("X"))
+                        .changed();
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut text.position.y, 0.0..=1000.0).text("Y"))
+                        .changed();
+
+                    ui.separator();
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut text.font_size, 1.0..=200.0).text("Font size"))
+                        .changed();
+
+                    ui.separator();
+
+                    ui.label("Cor RGBA");
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut text.color[0], 0..=255).text("R"))
+                        .changed();
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut text.color[1], 0..=255).text("G"))
+                        .changed();
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut text.color[2], 0..=255).text("B"))
+                        .changed();
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut text.color[3], 0..=255).text("A"))
+                        .changed();
+                }
+            }
+        }
+
+        if changed {
+            self.render_preview(context);
+        }
+    }
+
+    fn layers_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Layers");
+
+        ui.small(format!("{} layers", self.scene.layers.len(),));
+
+        ui.separator();
+
+        for layer in &self.scene.layers {
+            let id = layer.id();
+
+            let selected = self.selected_layer_id == Some(id);
+
+            let visible_marker = if layer.visible() { "●" } else { "○" };
+
+            let label = format!("{} {}", visible_marker, self.layer_label(layer),);
+
+            if ui.selectable_label(selected, label).clicked() {
+                self.selected_layer_id = Some(id);
+            }
+        }
+    }
+
+    fn layer_label(&self, layer: &Layer) -> String {
+        match layer {
+            Layer::Background(_) => "Background".to_owned(),
+
+            Layer::Text(text) if text.id == self.cpu_layer_id => "CPU Usage".to_owned(),
+
+            Layer::Text(text) => {
+                format!("Text: {}", text.text,)
+            }
+        }
     }
 
     fn change_profile(&mut self, profile: PreviewProfile, context: &egui::Context) {
@@ -403,6 +553,14 @@ impl OpenLcdApp {
             self.selected_profile.size().width,
             self.selected_profile.size().height,
         ));
+
+        ui.separator();
+
+        self.layers_panel(ui);
+
+        ui.separator();
+
+        self.properties_panel(ui, context);
     }
 
     fn preview_panel(&mut self, ui: &mut egui::Ui) {
