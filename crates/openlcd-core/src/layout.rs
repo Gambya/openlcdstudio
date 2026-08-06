@@ -1,12 +1,15 @@
+use serde::{Deserialize, Serialize};
+
 use crate::FrameSize;
 
-/// Tamanho padrão do canvas lógico usado pelos temas.
+/// Espaço lógico padrão usado pelos temas.
 ///
-/// As posições e dimensões dos elementos são armazenadas neste espaço,
-/// independentemente da resolução física do display.
+/// Todos os elementos da Scene são posicionados em um canvas virtual
+/// de 1000 × 1000 unidades, independentemente da resolução física
+/// do display.
 pub const LOGICAL_CANVAS_SIZE: f32 = 1_000.0;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LogicalPosition {
     pub x: f32,
     pub y: f32,
@@ -25,7 +28,7 @@ impl LogicalPosition {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LogicalSize {
     pub width: f32,
     pub height: f32,
@@ -44,7 +47,7 @@ impl LogicalSize {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LogicalRect {
     pub position: LogicalPosition,
     pub size: LogicalSize,
@@ -61,6 +64,7 @@ impl LogicalRect {
     pub fn to_pixels(self, target: FrameSize) -> PixelRect {
         PixelRect {
             position: self.position.to_pixels(target),
+
             size: self.size.to_pixels(target),
         }
     }
@@ -95,33 +99,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn converts_logical_position_to_kmex_pixels() {
+    fn center_maps_to_center_of_kmex() {
         let target = FrameSize::new(462, 1920);
 
         let logical = LogicalPosition::new(500.0, 500.0);
 
         let pixels = logical.to_pixels(target);
 
-        assert_eq!(pixels.x, 231);
-        assert_eq!(pixels.y, 960);
+        assert_eq!(pixels, PixelPosition { x: 231, y: 960 },);
     }
 
     #[test]
-    fn converts_logical_rect_to_square_display() {
+    fn rect_maps_to_square_display() {
         let target = FrameSize::new(480, 480);
 
-        let logical = LogicalRect::new(100.0, 200.0, 500.0, 250.0);
+        let rect = LogicalRect::new(100.0, 200.0, 500.0, 250.0);
 
-        let pixels = logical.to_pixels(target);
+        let pixels = rect.to_pixels(target);
 
-        assert_eq!(pixels.position.x, 48);
-        assert_eq!(pixels.position.y, 96);
-        assert_eq!(pixels.size.width, 240);
-        assert_eq!(pixels.size.height, 120);
+        assert_eq!(pixels.position, PixelPosition { x: 48, y: 96 },);
+
+        assert_eq!(
+            pixels.size,
+            PixelSize {
+                width: 240,
+                height: 120,
+            },
+        );
     }
 
     #[test]
-    fn clamps_values_outside_logical_canvas() {
+    fn out_of_bounds_values_are_clamped() {
         let target = FrameSize::new(100, 100);
 
         let position = LogicalPosition::new(-100.0, 1_500.0);

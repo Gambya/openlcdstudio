@@ -1,12 +1,20 @@
+use std::{fs, path::PathBuf, time::Instant};
+
+use ab_glyph::FontArc;
+
 use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions, Vec2};
 
 use openlcd_core::{
-    DeviceCapabilities, DisplayShape, FrameSize, Orientation, PixelFormat, RgbaFrame,
-    classify_display,
+    DeviceCapabilities, DisplayShape, FrameSize, LogicalPosition, Orientation, PixelFormat,
+    RgbaFrame, classify_display,
 };
 
 use openlcd_driver::DisplayDevice;
 use openlcd_fake_driver::FakeDisplay;
+
+use openlcd_render::SceneRenderer;
+
+use openlcd_theme::{Layer, LayerId, Scene, TextLayer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreviewProfile {
@@ -73,16 +81,90 @@ pub struct OpenLcdApp {
     last_render_ms: f64,
     actual_fps: f64,
     last_render_instant: Option<std::time::Instant>,
+
+    scene: Scene,
+    cpu_layer_id: LayerId,
+    font: FontArc,
+}
+
+fn load_default_font() -> FontArc {
+    let mut candidates = Vec::new();
+
+    if let Some(path) = std::env::var_os("OPENLCD_FONT") {
+        candidates.push(PathBuf::from(path));
+    }
+
+    candidates.extend([
+        PathBuf::from("/usr/share/fonts/TTF/DejaVuSans.ttf"),
+        PathBuf::from("/usr/share/fonts/dejavu/DejaVuSans.ttf"),
+        PathBuf::from("/usr/share/fonts/gnu-free/FreeSans.ttf"),
+    ]);
+
+    for path in candidates {
+        let Ok(bytes) = fs::read(&path) else {
+            continue;
+        };
+
+        let Ok(font) = FontArc::try_from_vec(bytes) else {
+            continue;
+        };
+
+        println!("Fonte carregada: {}", path.display(),);
+
+        return font;
+    }
+
+    panic!(concat!(
+        "Nenhuma fonte válida encontrada.\n",
+        "Defina OPENLCD_FONT apontando para ",
+        "um arquivo TTF, por exemplo:\n",
+        "set -x OPENLCD_FONT ",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf"
+    ));
+}
+
+fn create_initial_scene() -> (Scene, LayerId) {
+    let mut scene = Scene::new("OpenLCD Preview");
+
+    scene.add_background([18, 24, 42, 255]);
+
+    scene.add_text(TextLayer::new(
+        0,
+        "OpenLCD Studio",
+        LogicalPosition::new(60.0, 80.0),
+        32.0,
+        [255, 255, 255, 255],
+    ));
+
+    let cpu_layer_id = scene.add_text(TextLayer::new(
+        0,
+        "CPU 42%",
+        LogicalPosition::new(60.0, 230.0),
+        46.0,
+        [80, 220, 140, 255],
+    ));
+
+    (scene, cpu_layer_id)
 }
 
 impl OpenLcdApp {
     pub fn new(context: &eframe::CreationContext<'_>) -> Self {
         let selected_profile = PreviewProfile::Kmex;
 
+        let font = load_default_font();
+
+        let (scene, cpu_layer_id) = create_initial_scene();
+
         let mut app = Self {
             selected_profile,
+
             fake_display: FakeDisplay::new(selected_profile.capabilities()),
+
             texture: None,
+
+            scene,
+            cpu_layer_id,
+            font,
 
             brightness: 100,
             frame_count: 0,
@@ -118,6 +200,18 @@ impl OpenLcdApp {
         self.last_render_instant = None;
 
         self.render_preview(context);
+    }
+
+    fn update_scene_values(&mut self) {
+        let Some(layer) = self.scene.layer_mut(self.cpu_layer_id) else {
+            return;
+        };
+
+        let Layer::Text(text) = layer else {
+            return;
+        };
+
+        text.text = format!("CPU {:.0}%", self.cpu_usage,);
     }
 
     fn update_animation(&mut self, context: &egui::Context) {
@@ -161,13 +255,27 @@ impl OpenLcdApp {
     }
 
     fn render_preview(&mut self, context: &egui::Context) {
-        let render_started = std::time::Instant::now();
+        let render_started = Instant::now();
+
+        self.update_scene_values();
 
         let size = self.selected_profile.size();
 
-        let frame = generate_demo_frame(size, self.cpu_usage, self.frame_count);
+        let renderer = SceneRenderer::new(size, self.font.clone());
 
-        if self.fake_display.send_rgba(&frame).is_err() {
+        let frame = match renderer.render(&self.scene) {
+            Ok(frame) => frame,
+
+            Err(error) => {
+                eprintln!("Erro ao renderizar Scene: {error}");
+
+                return;
+            }
+        };
+
+        if let Err(error) = self.fake_display.send_rgba(&frame) {
+            eprintln!("FakeDisplay rejeitou frame: {error}");
+
             return;
         }
 
@@ -179,11 +287,10 @@ impl OpenLcdApp {
 
         let preview_frame = Self::apply_fake_brightness(frame, self.fake_display.brightness());
 
+        let size = preview_frame.size();
+
         let color_image = ColorImage::from_rgba_unmultiplied(
-            [
-                preview_frame.size().width as usize,
-                preview_frame.size().height as usize,
-            ],
+            [size.width as usize, size.height as usize],
             preview_frame.pixels(),
         );
 
@@ -201,7 +308,7 @@ impl OpenLcdApp {
             }
         }
 
-        let now = std::time::Instant::now();
+        let now = Instant::now();
 
         if let Some(previous) = self.last_render_instant {
             let delta = now.duration_since(previous).as_secs_f64();
@@ -342,61 +449,6 @@ impl eframe::App for OpenLcdApp {
             self.preview_panel(ui);
         });
     }
-}
-
-fn generate_demo_frame(size: FrameSize, cpu_usage: f32, frame_index: u64) -> RgbaFrame {
-    let width = size.width as usize;
-    let height = size.height as usize;
-
-    let mut pixels = vec![0_u8; width * height * 4];
-
-    let cpu_ratio = (cpu_usage / 100.0).clamp(0.0, 1.0);
-
-    let bar_width = (width as f32 * cpu_ratio).round() as usize;
-
-    let bar_top = height.saturating_mul(80) / 100;
-
-    let bar_bottom = height.saturating_mul(85) / 100;
-
-    for y in 0..height {
-        for x in 0..width {
-            let offset = (y * width + x) * 4;
-
-            let horizontal = x as f32 / width.max(1) as f32;
-
-            let vertical = y as f32 / height.max(1) as f32;
-
-            let movement = ((frame_index as f32 * 0.03).sin() * 20.0) as i16;
-
-            let red = (20.0 + horizontal * 50.0) as i16 + movement;
-
-            let green = (20.0 + vertical * 70.0) as i16;
-
-            let blue = (70.0 + horizontal * 80.0) as i16 - movement;
-
-            pixels[offset] = red.clamp(0, 255) as u8;
-
-            pixels[offset + 1] = green.clamp(0, 255) as u8;
-
-            pixels[offset + 2] = blue.clamp(0, 255) as u8;
-
-            pixels[offset + 3] = 255;
-
-            if y >= bar_top && y < bar_bottom {
-                if x < bar_width {
-                    pixels[offset] = 240;
-                    pixels[offset + 1] = 240;
-                    pixels[offset + 2] = 240;
-                } else {
-                    pixels[offset] = 35;
-                    pixels[offset + 1] = 35;
-                    pixels[offset + 2] = 35;
-                }
-            }
-        }
-    }
-
-    RgbaFrame::new(size, pixels).expect("demo frame always has a valid buffer")
 }
 
 fn fit_size(native: Vec2, available: Vec2) -> Vec2 {

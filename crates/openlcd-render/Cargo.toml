@@ -12,6 +12,7 @@ image = { version = "0.25", default-features = false, features = [
 imageproc = "0.25"
 ab_glyph = "0.2"
 thiserror = "2"
+openlcd-theme = { path = "../openlcd-theme" }
 
 [dev-dependencies]
 anyhow = "1"

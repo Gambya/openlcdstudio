@@ -2852,6 +2852,7 @@ version = "0.1.0"
 name = "openlcd-core"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "thiserror 2.0.19",
 ]
 
@@ -2875,10 +2876,13 @@ dependencies = [
 name = "openlcd-gui"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "eframe",
  "openlcd-core",
  "openlcd-driver",
  "openlcd-fake-driver",
+ "openlcd-render",
+ "openlcd-theme",
  "thiserror 2.0.19",
 ]
 
@@ -2904,6 +2908,7 @@ dependencies = [
  "imageproc",
  "kmex-vmax",
  "openlcd-core",
+ "openlcd-theme",
  "thiserror 2.0.19",
 ]
 
@@ -2914,6 +2919,11 @@ version = "0.1.0"
 [[package]]
 name = "openlcd-theme"
 version = "0.1.0"
+dependencies = [
+ "openlcd-core",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "openlcdstudio"

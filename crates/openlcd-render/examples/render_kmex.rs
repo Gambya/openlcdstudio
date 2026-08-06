@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
@@ -85,7 +85,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn print_usage(executable: &PathBuf) {
+fn print_usage(executable: &Path) {
     eprintln!(
         concat!(
             "Uso:\n",

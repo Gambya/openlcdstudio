@@ -5,7 +5,12 @@ edition = "2024"
 
 [dependencies]
 eframe = "0.36"
+ab_glyph = "0.2"
+
 openlcd-core = { path = "../openlcd-core" }
 openlcd-driver = { path = "../openlcd-driver" }
 openlcd-fake-driver = { path = "../openlcd-fake-driver" }
+openlcd-render = { path = "../openlcd-render" }
+openlcd-theme = { path = "../openlcd-theme" }
+
 thiserror = "2"
