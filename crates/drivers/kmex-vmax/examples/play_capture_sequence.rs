@@ -147,7 +147,7 @@ fn play_sequence(
         frames_sent += 1;
         bytes_sent += frame.bytes.len() as u64;
 
-        if frames_sent == 1 || frames_sent % 25 == 0 {
+        if frames_sent == 1 || frames_sent.is_multiple_of(25) {
             println!(
                 concat!(
                     "enviados={} ",

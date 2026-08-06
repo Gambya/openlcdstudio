@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
@@ -88,7 +88,7 @@ fn main() -> Result<()> {
         display.send_jpeg(&jpeg)?;
         frames_sent += 1;
 
-        if frames_sent == 1 || frames_sent % 10 == 0 {
+        if frames_sent == 1 || frames_sent.is_multiple_of(10) {
             println!(
                 "Quadros enviados: {frames_sent}; tempo: {:.2}s",
                 started_at.elapsed().as_secs_f64(),
@@ -120,7 +120,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn print_usage(executable: &PathBuf) {
+fn print_usage(executable: &Path) {
     eprintln!(
         concat!(
             "Uso:\n",
