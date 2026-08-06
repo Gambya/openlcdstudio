@@ -2,11 +2,13 @@ use std::{fs, path::PathBuf, time::Instant};
 
 use ab_glyph::FontArc;
 
-use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions, Vec2};
+use eframe::egui::{
+    self, ColorImage, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, TextureOptions, Vec2,
+};
 
 use openlcd_core::{
-    DeviceCapabilities, DisplayShape, FrameSize, LogicalPosition, Orientation, PixelFormat,
-    RgbaFrame, classify_display,
+    DeviceCapabilities, DisplayShape, FrameSize, LOGICAL_CANVAS_SIZE, LogicalPosition, Orientation,
+    PixelFormat, RgbaFrame, classify_display,
 };
 
 use openlcd_driver::DisplayDevice;
@@ -64,6 +66,71 @@ impl PreviewProfile {
             supports_brightness: true,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PreviewTransform {
+    rect: Rect,
+    native_size: FrameSize,
+}
+
+impl PreviewTransform {
+    fn new(rect: Rect, native_size: FrameSize) -> Self {
+        Self { rect, native_size }
+    }
+
+    fn screen_to_logical(&self, position: Pos2) -> Option<LogicalPosition> {
+        if !self.rect.contains(position) {
+            return None;
+        }
+
+        if self.rect.width() <= 0.0 || self.rect.height() <= 0.0 {
+            return None;
+        }
+
+        let normalized_x = (position.x - self.rect.left()) / self.rect.width();
+
+        let normalized_y = (position.y - self.rect.top()) / self.rect.height();
+
+        Some(LogicalPosition::new(
+            normalized_x * LOGICAL_CANVAS_SIZE,
+            normalized_y * LOGICAL_CANVAS_SIZE,
+        ))
+    }
+
+    fn logical_to_screen(&self, position: LogicalPosition) -> Pos2 {
+        Pos2::new(
+            self.rect.left() + (position.x / LOGICAL_CANVAS_SIZE) * self.rect.width(),
+            self.rect.top() + (position.y / LOGICAL_CANVAS_SIZE) * self.rect.height(),
+        )
+    }
+
+    fn logical_size_to_screen(&self, width: f32, height: f32) -> Vec2 {
+        Vec2::new(
+            width / LOGICAL_CANVAS_SIZE * self.rect.width(),
+            height / LOGICAL_CANVAS_SIZE * self.rect.height(),
+        )
+    }
+}
+
+fn text_logical_size(text: &str, font_size: f32, target: FrameSize) -> Vec2 {
+    if text.is_empty() {
+        return Vec2::ZERO;
+    }
+
+    let character_count = text.chars().count() as f32;
+
+    let pixel_font_size = font_size * target.height as f32 / LOGICAL_CANVAS_SIZE;
+
+    let pixel_width = character_count * pixel_font_size * 0.60;
+
+    let pixel_height = pixel_font_size * 1.20;
+
+    let logical_width = pixel_width / target.width as f32 * LOGICAL_CANVAS_SIZE;
+
+    let logical_height = pixel_height / target.height as f32 * LOGICAL_CANVAS_SIZE;
+
+    Vec2::new(logical_width, logical_height)
 }
 
 pub struct OpenLcdApp {
@@ -183,6 +250,67 @@ impl OpenLcdApp {
         app.render_preview(&context.egui_ctx);
 
         app
+    }
+
+    fn hit_test_scene(
+        &self,
+        logical_position: LogicalPosition,
+        target: FrameSize,
+    ) -> Option<LayerId> {
+        for layer in self.scene.layers.iter().rev() {
+            if !layer.visible() {
+                continue;
+            }
+
+            match layer {
+                Layer::Text(text) => {
+                    let size = text_logical_size(&text.text, text.font_size, target);
+
+                    let left = text.position.x;
+
+                    let top = text.position.y;
+
+                    let right = left + size.x;
+
+                    let bottom = top + size.y;
+
+                    if logical_position.x >= left
+                        && logical_position.x <= right
+                        && logical_position.y >= top
+                        && logical_position.y <= bottom
+                    {
+                        return Some(text.id);
+                    }
+                }
+
+                Layer::Background(background) => {
+                    return Some(background.id);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn selected_layer_screen_rect(&self, transform: PreviewTransform) -> Option<Rect> {
+        let selected_id = self.selected_layer_id?;
+
+        let layer = self.scene.layer(selected_id)?;
+
+        match layer {
+            Layer::Background(_) => Some(transform.rect),
+
+            Layer::Text(text) => {
+                let logical_size =
+                    text_logical_size(&text.text, text.font_size, transform.native_size);
+
+                let top_left = transform.logical_to_screen(text.position);
+
+                let screen_size = transform.logical_size_to_screen(logical_size.x, logical_size.y);
+
+                Some(Rect::from_min_size(top_left, screen_size))
+            }
+        }
     }
 
     fn properties_panel(&mut self, ui: &mut egui::Ui, context: &egui::Context) {
@@ -566,8 +694,9 @@ impl OpenLcdApp {
     fn preview_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Preview");
 
-        let Some(texture) = &self.texture else {
+        let Some(texture) = self.texture.clone() else {
             ui.label("Nenhum quadro disponível.");
+
             return;
         };
 
@@ -583,8 +712,44 @@ impl OpenLcdApp {
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.centered_and_justified(|ui| {
-                    ui.add(egui::Image::new(texture).fit_to_exact_size(preview_size));
+                let available = ui.available_size();
+
+                let horizontal_space = (available.x - preview_size.x).max(0.0);
+
+                let vertical_space = (available.y - preview_size.y).max(0.0);
+
+                ui.add_space(vertical_space / 2.0);
+
+                ui.horizontal(|ui| {
+                    ui.add_space(horizontal_space / 2.0);
+
+                    let response = ui.add(
+                        egui::Image::new(&texture)
+                            .fit_to_exact_size(preview_size)
+                            .sense(Sense::click()),
+                    );
+
+                    let transform = PreviewTransform::new(response.rect, native);
+
+                    if response.clicked() {
+                        if let Some(pointer_position) = response.interact_pointer_pos() {
+                            if let Some(logical_position) =
+                                transform.screen_to_logical(pointer_position)
+                            {
+                                self.selected_layer_id =
+                                    self.hit_test_scene(logical_position, native);
+                            }
+                        }
+                    }
+
+                    if let Some(selection_rect) = self.selected_layer_screen_rect(transform) {
+                        ui.painter().rect_stroke(
+                            selection_rect,
+                            0.0,
+                            Stroke::new(1.5, egui::Color32::YELLOW),
+                            StrokeKind::Outside,
+                        );
+                    }
                 });
             });
     }
