@@ -133,28 +133,6 @@ fn text_logical_size(text: &str, font_size: f32, target: FrameSize) -> Vec2 {
     Vec2::new(logical_width, logical_height)
 }
 
-pub struct OpenLcdApp {
-    selected_profile: PreviewProfile,
-    fake_display: FakeDisplay,
-    texture: Option<TextureHandle>,
-
-    brightness: u8,
-    frame_count: u64,
-
-    cpu_usage: f32,
-    animate: bool,
-    last_frame_time: f64,
-
-    last_render_ms: f64,
-    actual_fps: f64,
-    last_render_instant: Option<std::time::Instant>,
-
-    scene: Scene,
-    cpu_layer_id: LayerId,
-    selected_layer_id: Option<LayerId>,
-    font: FontArc,
-}
-
 fn load_default_font() -> FontArc {
     let mut candidates = Vec::new();
 
@@ -215,6 +193,32 @@ fn create_initial_scene() -> (Scene, LayerId) {
     (scene, cpu_layer_id)
 }
 
+pub struct OpenLcdApp {
+    selected_profile: PreviewProfile,
+    fake_display: FakeDisplay,
+    texture: Option<TextureHandle>,
+
+    brightness: u8,
+    frame_count: u64,
+
+    cpu_usage: f32,
+    animate: bool,
+    last_frame_time: f64,
+
+    last_render_ms: f64,
+    actual_fps: f64,
+    last_render_instant: Option<std::time::Instant>,
+
+    scene: Scene,
+    cpu_layer_id: LayerId,
+    selected_layer_id: Option<LayerId>,
+    font: FontArc,
+
+    dragging_layer_id: Option<LayerId>,
+    drag_start_logical: Option<LogicalPosition>,
+    drag_start_layer_position: Option<LogicalPosition>,
+}
+
 impl OpenLcdApp {
     pub fn new(context: &eframe::CreationContext<'_>) -> Self {
         let selected_profile = PreviewProfile::Kmex;
@@ -234,6 +238,10 @@ impl OpenLcdApp {
             cpu_layer_id,
             selected_layer_id: Some(cpu_layer_id),
             font,
+
+            dragging_layer_id: None,
+            drag_start_logical: None,
+            drag_start_layer_position: None,
 
             brightness: 100,
             frame_count: 0,
@@ -290,6 +298,81 @@ impl OpenLcdApp {
         }
 
         None
+    }
+
+    fn text_layer_position(&self, id: LayerId) -> Option<LogicalPosition> {
+        let layer = self.scene.layer(id)?;
+
+        match layer {
+            Layer::Text(text) => Some(text.position),
+
+            Layer::Background(_) => None,
+        }
+    }
+
+    fn begin_drag(&mut self, logical_position: LogicalPosition, target: FrameSize) {
+        let Some(layer_id) = self.hit_test_scene(logical_position, target) else {
+            self.dragging_layer_id = None;
+            return;
+        };
+
+        self.selected_layer_id = Some(layer_id);
+
+        let Some(layer_position) = self.text_layer_position(layer_id) else {
+            // Background pode ser selecionado,
+            // mas não pode ser arrastado.
+            self.dragging_layer_id = None;
+            self.drag_start_logical = None;
+            self.drag_start_layer_position = None;
+
+            return;
+        };
+
+        self.dragging_layer_id = Some(layer_id);
+
+        self.drag_start_logical = Some(logical_position);
+
+        self.drag_start_layer_position = Some(layer_position);
+    }
+
+    fn update_drag(&mut self, logical_position: LogicalPosition, context: &egui::Context) {
+        let Some(layer_id) = self.dragging_layer_id else {
+            return;
+        };
+
+        let Some(drag_start) = self.drag_start_logical else {
+            return;
+        };
+
+        let Some(layer_start) = self.drag_start_layer_position else {
+            return;
+        };
+
+        let delta_x = logical_position.x - drag_start.x;
+
+        let delta_y = logical_position.y - drag_start.y;
+
+        let new_x = (layer_start.x + delta_x).clamp(0.0, LOGICAL_CANVAS_SIZE);
+
+        let new_y = (layer_start.y + delta_y).clamp(0.0, LOGICAL_CANVAS_SIZE);
+
+        let Some(layer) = self.scene.layer_mut(layer_id) else {
+            return;
+        };
+
+        let Layer::Text(text) = layer else {
+            return;
+        };
+
+        text.position = LogicalPosition::new(new_x, new_y);
+
+        self.render_preview(context);
+    }
+
+    fn end_drag(&mut self) {
+        self.dragging_layer_id = None;
+        self.drag_start_logical = None;
+        self.drag_start_layer_position = None;
     }
 
     fn selected_layer_screen_rect(&self, transform: PreviewTransform) -> Option<Rect> {
@@ -726,10 +809,34 @@ impl OpenLcdApp {
                     let response = ui.add(
                         egui::Image::new(&texture)
                             .fit_to_exact_size(preview_size)
-                            .sense(Sense::click()),
+                            .sense(Sense::click_and_drag()),
                     );
 
                     let transform = PreviewTransform::new(response.rect, native);
+
+                    if response.drag_started() {
+                        if let Some(pointer_position) = response.interact_pointer_pos() {
+                            if let Some(logical_position) =
+                                transform.screen_to_logical(pointer_position)
+                            {
+                                self.begin_drag(logical_position, native);
+                            }
+                        }
+                    }
+
+                    if response.dragged() {
+                        if let Some(pointer_position) = response.interact_pointer_pos() {
+                            if let Some(logical_position) =
+                                transform.screen_to_logical(pointer_position)
+                            {
+                                self.update_drag(logical_position, ui.ctx());
+                            }
+                        }
+                    }
+
+                    if response.drag_stopped() {
+                        self.end_drag();
+                    }
 
                     if response.clicked() {
                         if let Some(pointer_position) = response.interact_pointer_pos() {
@@ -743,10 +850,16 @@ impl OpenLcdApp {
                     }
 
                     if let Some(selection_rect) = self.selected_layer_screen_rect(transform) {
+                        let stroke_width = if self.dragging_layer_id.is_some() {
+                            2.5
+                        } else {
+                            1.5
+                        };
+
                         ui.painter().rect_stroke(
                             selection_rect,
                             0.0,
-                            Stroke::new(1.5, egui::Color32::YELLOW),
+                            Stroke::new(stroke_width, egui::Color32::YELLOW),
                             StrokeKind::Outside,
                         );
                     }
