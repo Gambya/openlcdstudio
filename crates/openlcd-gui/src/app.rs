@@ -7,8 +7,8 @@ use eframe::egui::{
 };
 
 use openlcd_core::{
-    DeviceCapabilities, DisplayShape, FrameSize, LOGICAL_CANVAS_SIZE, LogicalPosition, Orientation,
-    PixelFormat, RgbaFrame, classify_display,
+    DeviceCapabilities, DisplayShape, FrameSize, LOGICAL_CANVAS_SIZE, LogicalPosition, LogicalRect,
+    Orientation, PixelFormat, RgbaFrame, classify_display,
 };
 
 use openlcd_driver::DisplayDevice;
@@ -16,7 +16,7 @@ use openlcd_fake_driver::FakeDisplay;
 
 use openlcd_render::SceneRenderer;
 
-use openlcd_theme::{Layer, LayerId, Scene, TextLayer};
+use openlcd_theme::{ImageFit, ImageLayer, Layer, LayerId, Scene, TextLayer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreviewProfile {
@@ -187,6 +187,14 @@ fn create_initial_scene() -> (Scene, LayerId) {
 
     scene.add_background([18, 24, 42, 255]);
 
+    if let Ok(image_path) = std::env::var("OPENLCD_PREVIEW_IMAGE") {
+        let mut image = ImageLayer::new(0, image_path, LogicalRect::new(0.0, 0.0, 1000.0, 1000.0));
+
+        image.fit = ImageFit::Cover;
+
+        scene.add_image(image);
+    }
+
     scene.add_text(TextLayer::new(
         0,
         "OpenLCD Studio",
@@ -228,6 +236,7 @@ pub struct OpenLcdApp {
     cpu_layer_id: LayerId,
     selected_layer_id: Option<LayerId>,
     font: FontArc,
+    renderer: SceneRenderer,
 
     dragging_layer_id: Option<LayerId>,
     drag_start_logical: Option<LogicalPosition>,
@@ -236,6 +245,7 @@ pub struct OpenLcdApp {
     resizing_layer_id: Option<LayerId>,
     resize_start_pointer: Option<Pos2>,
     resize_start_font_size: Option<f32>,
+    resize_start_image_rect: Option<LogicalRect>,
 }
 
 impl OpenLcdApp {
@@ -243,6 +253,7 @@ impl OpenLcdApp {
         let selected_profile = PreviewProfile::Kmex;
 
         let font = load_default_font();
+        let renderer = SceneRenderer::new(selected_profile.size(), font.clone());
 
         let (scene, cpu_layer_id) = create_initial_scene();
 
@@ -257,6 +268,7 @@ impl OpenLcdApp {
             cpu_layer_id,
             selected_layer_id: Some(cpu_layer_id),
             font,
+            renderer,
 
             dragging_layer_id: None,
             drag_start_logical: None,
@@ -265,6 +277,7 @@ impl OpenLcdApp {
             resizing_layer_id: None,
             resize_start_pointer: None,
             resize_start_font_size: None,
+            resize_start_image_rect: None,
 
             brightness: 100,
             frame_count: 0,
@@ -288,18 +301,18 @@ impl OpenLcdApp {
 
         let layer = self.scene.layer(selected_id)?;
 
-        if !matches!(layer, Layer::Text(_)) {
-            return None;
+        match layer {
+            Layer::Background(_) => None,
+
+            Layer::Image(_) | Layer::Text(_) => {
+                let bounds = self.selected_layer_screen_rect(transform)?;
+
+                Some(Rect::from_center_size(
+                    bounds.right_bottom(),
+                    Vec2::splat(RESIZE_HANDLE_SIZE),
+                ))
+            }
         }
-
-        let bounds = self.selected_layer_screen_rect(transform)?;
-
-        let center = bounds.right_bottom();
-
-        Some(Rect::from_center_size(
-            center,
-            Vec2::splat(RESIZE_HANDLE_SIZE),
-        ))
     }
 
     fn begin_resize(&mut self, pointer_position: Pos2) {
@@ -311,15 +324,30 @@ impl OpenLcdApp {
             return;
         };
 
-        let Layer::Text(text) = layer else {
-            return;
-        };
+        self.resize_start_font_size = None;
+        self.resize_start_image_rect = None;
 
-        self.resizing_layer_id = Some(layer_id);
+        match layer {
+            Layer::Background(_) => {
+                return;
+            }
 
-        self.resize_start_pointer = Some(pointer_position);
+            Layer::Image(image) => {
+                self.resizing_layer_id = Some(layer_id);
 
-        self.resize_start_font_size = Some(text.font_size);
+                self.resize_start_pointer = Some(pointer_position);
+
+                self.resize_start_image_rect = Some(image.rect);
+            }
+
+            Layer::Text(text) => {
+                self.resizing_layer_id = Some(layer_id);
+
+                self.resize_start_pointer = Some(pointer_position);
+
+                self.resize_start_font_size = Some(text.font_size);
+            }
+        }
 
         // Resize e drag são mutuamente exclusivos.
         self.dragging_layer_id = None;
@@ -341,29 +369,57 @@ impl OpenLcdApp {
             return;
         };
 
-        let Some(start_font_size) = self.resize_start_font_size else {
-            return;
-        };
-
-        if transform.rect.height() <= 0.0 {
+        if transform.rect.width() <= 0.0 || transform.rect.height() <= 0.0 {
             return;
         }
 
-        let screen_delta = pointer_position.y - start_pointer.y;
+        let delta_screen = pointer_position - start_pointer;
 
-        let logical_delta = screen_delta / transform.rect.height() * LOGICAL_CANVAS_SIZE;
+        let delta_logical_x = delta_screen.x / transform.rect.width() * LOGICAL_CANVAS_SIZE;
 
-        let new_font_size = (start_font_size + logical_delta).clamp(1.0, 300.0);
+        let delta_logical_y = delta_screen.y / transform.rect.height() * LOGICAL_CANVAS_SIZE;
+
+        let start_font_size = self.resize_start_font_size;
+
+        let start_image_rect = self.resize_start_image_rect;
 
         let Some(layer) = self.scene.layer_mut(layer_id) else {
             return;
         };
 
-        let Layer::Text(text) = layer else {
-            return;
-        };
+        match layer {
+            Layer::Background(_) => {
+                return;
+            }
 
-        text.font_size = new_font_size;
+            Layer::Image(image) => {
+                let Some(start_rect) = start_image_rect else {
+                    return;
+                };
+
+                let max_width = (LOGICAL_CANVAS_SIZE - start_rect.position.x).max(1.0);
+
+                let max_height = (LOGICAL_CANVAS_SIZE - start_rect.position.y).max(1.0);
+
+                image.rect.size.width =
+                    (start_rect.size.width + delta_logical_x).clamp(1.0, max_width);
+
+                image.rect.size.height =
+                    (start_rect.size.height + delta_logical_y).clamp(1.0, max_height);
+            }
+
+            Layer::Text(text) => {
+                let Some(start_font_size) = start_font_size else {
+                    return;
+                };
+
+                // Mantém o comportamento que já validamos:
+                // movimento vertical altera font_size.
+                let new_font_size = (start_font_size + delta_logical_y).clamp(1.0, 300.0);
+
+                text.font_size = new_font_size;
+            }
+        }
 
         self.render_preview(context);
     }
@@ -372,6 +428,7 @@ impl OpenLcdApp {
         self.resizing_layer_id = None;
         self.resize_start_pointer = None;
         self.resize_start_font_size = None;
+        self.resize_start_image_rect = None;
     }
 
     fn hit_test_scene(
@@ -405,6 +462,24 @@ impl OpenLcdApp {
                     }
                 }
 
+                Layer::Image(image) => {
+                    let left = image.rect.position.x;
+
+                    let top = image.rect.position.y;
+
+                    let right = left + image.rect.size.width;
+
+                    let bottom = top + image.rect.size.height;
+
+                    if logical_position.x >= left
+                        && logical_position.x <= right
+                        && logical_position.y >= top
+                        && logical_position.y <= bottom
+                    {
+                        return Some(image.id);
+                    }
+                }
+
                 Layer::Background(background) => {
                     return Some(background.id);
                 }
@@ -414,13 +489,15 @@ impl OpenLcdApp {
         None
     }
 
-    fn text_layer_position(&self, id: LayerId) -> Option<LogicalPosition> {
+    fn layer_position(&self, id: LayerId) -> Option<LogicalPosition> {
         let layer = self.scene.layer(id)?;
 
         match layer {
-            Layer::Text(text) => Some(text.position),
-
             Layer::Background(_) => None,
+
+            Layer::Image(image) => Some(image.rect.position),
+
+            Layer::Text(text) => Some(text.position),
         }
     }
 
@@ -432,7 +509,7 @@ impl OpenLcdApp {
 
         self.selected_layer_id = Some(layer_id);
 
-        let Some(layer_position) = self.text_layer_position(layer_id) else {
+        let Some(layer_position) = self.layer_position(layer_id) else {
             // Background pode ser selecionado,
             // mas não pode ser arrastado.
             self.dragging_layer_id = None;
@@ -466,19 +543,36 @@ impl OpenLcdApp {
 
         let delta_y = logical_position.y - drag_start.y;
 
-        let new_x = (layer_start.x + delta_x).clamp(0.0, LOGICAL_CANVAS_SIZE);
+        let new_x = layer_start.x + delta_x;
 
-        let new_y = (layer_start.y + delta_y).clamp(0.0, LOGICAL_CANVAS_SIZE);
+        let new_y = layer_start.y + delta_y;
 
         let Some(layer) = self.scene.layer_mut(layer_id) else {
             return;
         };
 
-        let Layer::Text(text) = layer else {
-            return;
-        };
+        match layer {
+            Layer::Background(_) => {
+                return;
+            }
 
-        text.position = LogicalPosition::new(new_x, new_y);
+            Layer::Image(image) => {
+                let max_x = (LOGICAL_CANVAS_SIZE - image.rect.size.width).max(0.0);
+
+                let max_y = (LOGICAL_CANVAS_SIZE - image.rect.size.height).max(0.0);
+
+                image.rect.position.x = new_x.clamp(0.0, max_x);
+
+                image.rect.position.y = new_y.clamp(0.0, max_y);
+            }
+
+            Layer::Text(text) => {
+                text.position = LogicalPosition::new(
+                    new_x.clamp(0.0, LOGICAL_CANVAS_SIZE),
+                    new_y.clamp(0.0, LOGICAL_CANVAS_SIZE),
+                );
+            }
+        }
 
         self.render_preview(context);
     }
@@ -496,6 +590,15 @@ impl OpenLcdApp {
 
         match layer {
             Layer::Background(_) => Some(transform.rect),
+
+            Layer::Image(image) => {
+                let top_left = transform.logical_to_screen(image.rect.position);
+
+                let size =
+                    transform.logical_size_to_screen(image.rect.size.width, image.rect.size.height);
+
+                Some(Rect::from_min_size(top_left, size))
+            }
 
             Layer::Text(text) => {
                 let logical_size = text_logical_size(
@@ -562,6 +665,78 @@ impl OpenLcdApp {
 
                     changed |= ui
                         .add(egui::Slider::new(&mut background.color[3], 0..=255).text("A"))
+                        .changed();
+                }
+
+                Layer::Image(image) => {
+                    ui.label("Tipo: Image");
+
+                    changed |= ui.checkbox(&mut image.visible, "Visível").changed();
+
+                    ui.separator();
+
+                    ui.label("Source");
+
+                    changed |= ui.text_edit_singleline(&mut image.source).changed();
+
+                    ui.separator();
+
+                    ui.label("Posição lógica");
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut image.rect.position.x, 0.0..=1000.0).text("X"))
+                        .changed();
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut image.rect.position.y, 0.0..=1000.0).text("Y"))
+                        .changed();
+
+                    ui.separator();
+
+                    ui.label("Tamanho lógico");
+
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut image.rect.size.width, 1.0..=1000.0)
+                                .text("Width"),
+                        )
+                        .changed();
+
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut image.rect.size.height, 1.0..=1000.0)
+                                .text("Height"),
+                        )
+                        .changed();
+
+                    ui.separator();
+
+                    ui.label("Fit");
+
+                    egui::ComboBox::from_id_salt(format!("image-fit-{}", image.id,))
+                        .selected_text(match image.fit {
+                            ImageFit::Cover => "Cover",
+                            ImageFit::Contain => "Contain",
+                            ImageFit::Stretch => "Stretch",
+                        })
+                        .show_ui(ui, |ui| {
+                            changed |= ui
+                                .selectable_value(&mut image.fit, ImageFit::Cover, "Cover")
+                                .changed();
+
+                            changed |= ui
+                                .selectable_value(&mut image.fit, ImageFit::Contain, "Contain")
+                                .changed();
+
+                            changed |= ui
+                                .selectable_value(&mut image.fit, ImageFit::Stretch, "Stretch")
+                                .changed();
+                        });
+
+                    ui.separator();
+
+                    changed |= ui
+                        .add(egui::Slider::new(&mut image.opacity, 0..=255).text("Opacity"))
                         .changed();
                 }
 
@@ -654,20 +829,27 @@ impl OpenLcdApp {
         match layer {
             Layer::Background(_) => "Background".to_owned(),
 
+            Layer::Image(image) => {
+                let name = std::path::Path::new(&image.source)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(&image.source);
+
+                format!("Image: {name}")
+            }
+
             Layer::Text(text) if text.id == self.cpu_layer_id => "CPU Usage".to_owned(),
 
             Layer::Text(text) => {
-                format!("Text: {}", text.text,)
+                format!("Text: {}", text.text)
             }
         }
     }
 
     fn change_profile(&mut self, profile: PreviewProfile, context: &egui::Context) {
-        if profile == self.selected_profile {
-            return;
-        }
-
         self.selected_profile = profile;
+
+        self.renderer.set_size(profile.size());
 
         self.fake_display = FakeDisplay::new(profile.capabilities());
 
@@ -738,11 +920,7 @@ impl OpenLcdApp {
 
         self.update_scene_values();
 
-        let size = self.selected_profile.size();
-
-        let renderer = SceneRenderer::new(size, self.font.clone());
-
-        let frame = match renderer.render(&self.scene) {
+        let frame = match self.renderer.render(&self.scene) {
             Ok(frame) => frame,
 
             Err(error) => {
@@ -932,20 +1110,20 @@ impl OpenLcdApp {
 
                     let transform = PreviewTransform::new(response.rect, native);
 
-                    if response.drag_started() {
-                        if let Some(pointer_position) = response.interact_pointer_pos() {
-                            let resize_handle = self.selected_resize_handle_rect(transform);
+                    if response.drag_started()
+                        && let Some(pointer_position) = response.interact_pointer_pos()
+                    {
+                        let resize_handle = self.selected_resize_handle_rect(transform);
 
-                            let resizing = resize_handle
-                                .is_some_and(|rect| rect.expand(4.0).contains(pointer_position));
+                        let resizing = resize_handle
+                            .is_some_and(|rect| rect.expand(4.0).contains(pointer_position));
 
-                            if resizing {
-                                self.begin_resize(pointer_position);
-                            } else if let Some(logical_position) =
-                                transform.screen_to_logical(pointer_position)
-                            {
-                                self.begin_drag(logical_position, native);
-                            }
+                        if resizing {
+                            self.begin_resize(pointer_position);
+                        } else if let Some(logical_position) =
+                            transform.screen_to_logical(pointer_position)
+                        {
+                            self.begin_drag(logical_position, native);
                         }
                     }
 
@@ -966,23 +1144,19 @@ impl OpenLcdApp {
                         self.end_resize();
                     }
 
-                    if response.clicked() {
-                        if let Some(pointer_position) = response.interact_pointer_pos() {
-                            if let Some(logical_position) =
-                                transform.screen_to_logical(pointer_position)
-                            {
-                                self.selected_layer_id =
-                                    self.hit_test_scene(logical_position, native);
-                            }
-                        }
+                    if response.clicked()
+                        && let Some(pointer_position) = response.interact_pointer_pos()
+                        && let Some(logical_position) =
+                            transform.screen_to_logical(pointer_position)
+                    {
+                        self.selected_layer_id = self.hit_test_scene(logical_position, native);
                     }
 
-                    if let Some(pointer_position) = ui.ctx().pointer_hover_pos() {
-                        if let Some(handle_rect) = self.selected_resize_handle_rect(transform) {
-                            if handle_rect.expand(4.0).contains(pointer_position) {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeNwSe);
-                            }
-                        }
+                    if let Some(pointer_position) = ui.ctx().pointer_hover_pos()
+                        && let Some(handle_rect) = self.selected_resize_handle_rect(transform)
+                        && handle_rect.expand(4.0).contains(pointer_position)
+                    {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeNwSe);
                     }
 
                     if let Some(selection_rect) = self.selected_layer_screen_rect(transform) {

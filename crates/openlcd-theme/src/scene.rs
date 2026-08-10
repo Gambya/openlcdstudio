@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{BackgroundLayer, Layer, LayerId, TextLayer};
+use crate::{BackgroundLayer, ImageLayer, Layer, LayerId, TextLayer};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
@@ -18,6 +18,20 @@ impl Scene {
             layers: Vec::new(),
             next_layer_id: 1,
         }
+    }
+
+    pub fn add_image(&mut self, mut layer: ImageLayer) -> LayerId {
+        if layer.id == 0 {
+            layer.id = self.next_layer_id();
+        } else {
+            self.next_layer_id = self.next_layer_id.max(layer.id + 1);
+        }
+
+        let id = layer.id;
+
+        self.layers.push(Layer::Image(layer));
+
+        id
     }
 
     pub fn next_layer_id(&mut self) -> LayerId {

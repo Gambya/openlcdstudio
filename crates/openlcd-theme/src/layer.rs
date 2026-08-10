@@ -4,9 +4,17 @@ use serde::{Deserialize, Serialize};
 
 pub type LayerId = u64;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ImageFit {
+    Stretch,
+    Contain,
+    Cover,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Layer {
     Background(BackgroundLayer),
+    Image(ImageLayer),
     Text(TextLayer),
 }
 
@@ -14,6 +22,7 @@ impl Layer {
     pub const fn id(&self) -> LayerId {
         match self {
             Self::Background(layer) => layer.id,
+            Self::Image(layer) => layer.id,
             Self::Text(layer) => layer.id,
         }
     }
@@ -21,6 +30,7 @@ impl Layer {
     pub const fn visible(&self) -> bool {
         match self {
             Self::Background(layer) => layer.visible,
+            Self::Image(layer) => layer.visible,
             Self::Text(layer) => layer.visible,
         }
     }
@@ -30,6 +40,11 @@ impl Layer {
             Self::Background(layer) => {
                 layer.visible = visible;
             }
+
+            Self::Image(layer) => {
+                layer.visible = visible;
+            }
+
             Self::Text(layer) => {
                 layer.visible = visible;
             }
@@ -50,6 +65,32 @@ impl BackgroundLayer {
             id,
             visible: true,
             color,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImageLayer {
+    pub id: LayerId,
+    pub visible: bool,
+
+    pub source: String,
+    pub rect: LogicalRect,
+
+    pub fit: ImageFit,
+
+    pub opacity: u8,
+}
+
+impl ImageLayer {
+    pub fn new(id: LayerId, source: impl Into<String>, rect: LogicalRect) -> Self {
+        Self {
+            id,
+            visible: true,
+            source: source.into(),
+            rect,
+            fit: ImageFit::Cover,
+            opacity: 255,
         }
     }
 }
