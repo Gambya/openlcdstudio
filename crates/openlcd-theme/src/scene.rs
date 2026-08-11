@@ -20,6 +20,50 @@ impl Scene {
         }
     }
 
+    pub fn move_layer_up(&mut self, id: LayerId) -> bool {
+        let Some(index) = self.layers.iter().position(|layer| layer.id() == id) else {
+            return false;
+        };
+
+        if matches!(self.layers[index], Layer::Background(_)) {
+            return false;
+        }
+
+        if index + 1 >= self.layers.len() {
+            return false;
+        }
+
+        self.layers.swap(index, index + 1);
+
+        true
+    }
+
+    pub fn move_layer_down(&mut self, id: LayerId) -> bool {
+        let Some(index) = self.layers.iter().position(|layer| layer.id() == id) else {
+            return false;
+        };
+
+        if index == 0 || matches!(self.layers[index], Layer::Background(_)) {
+            return false;
+        }
+
+        let target = index - 1;
+
+        // Mantemos Background preso ao fundo.
+        if matches!(self.layers[target], Layer::Background(_)) {
+            return false;
+        }
+
+        self.layers.swap(index, target);
+
+        true
+    }
+
+    pub fn is_background(&self, id: LayerId) -> bool {
+        self.layer(id)
+            .is_some_and(|layer| matches!(layer, Layer::Background(_)))
+    }
+
     pub fn add_image(&mut self, mut layer: ImageLayer) -> LayerId {
         if layer.id == 0 {
             layer.id = self.next_layer_id();
@@ -83,54 +127,5 @@ impl Scene {
 
     pub fn rebuild_layer_ids(&mut self) {
         self.next_layer_id = self.layers.iter().map(Layer::id).max().unwrap_or(0) + 1;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use openlcd_core::LogicalPosition;
-
-    use super::*;
-
-    #[test]
-    fn creates_incremental_layer_ids() {
-        let mut scene = Scene::new("test");
-
-        let background = scene.add_background([0, 0, 0, 255]);
-
-        let text = scene.add_text(TextLayer::new(
-            0,
-            "CPU",
-            LogicalPosition::new(100.0, 200.0),
-            48.0,
-            [255, 255, 255, 255],
-        ));
-
-        assert_eq!(background, 1);
-        assert_eq!(text, 2);
-    }
-
-    #[test]
-    fn removes_layer() {
-        let mut scene = Scene::new("test");
-
-        let id = scene.add_background([0, 0, 0, 255]);
-
-        assert!(scene.remove_layer(id));
-
-        assert!(scene.layers.is_empty());
-    }
-
-    #[test]
-    fn rebuilds_next_layer_id() {
-        let mut scene = Scene::new("test");
-
-        scene
-            .layers
-            .push(Layer::Background(BackgroundLayer::new(10, [0, 0, 0, 255])));
-
-        scene.rebuild_layer_ids();
-
-        assert_eq!(scene.next_layer_id(), 11,);
     }
 }

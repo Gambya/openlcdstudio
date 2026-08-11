@@ -14,3 +14,4 @@ openlcd-render = { path = "../openlcd-render" }
 openlcd-theme = { path = "../openlcd-theme" }
 
 thiserror = "2"
+rfd = "0.17.2"

@@ -18,6 +18,8 @@ use openlcd_render::SceneRenderer;
 
 use openlcd_theme::{ImageFit, ImageLayer, Layer, LayerId, Scene, TextLayer};
 
+use rfd::FileDialog;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreviewProfile {
     Kmex,
@@ -187,14 +189,6 @@ fn create_initial_scene() -> (Scene, LayerId) {
 
     scene.add_background([18, 24, 42, 255]);
 
-    if let Ok(image_path) = std::env::var("OPENLCD_PREVIEW_IMAGE") {
-        let mut image = ImageLayer::new(0, image_path, LogicalRect::new(0.0, 0.0, 1000.0, 1000.0));
-
-        image.fit = ImageFit::Cover;
-
-        scene.add_image(image);
-    }
-
     scene.add_text(TextLayer::new(
         0,
         "OpenLCD Studio",
@@ -294,6 +288,109 @@ impl OpenLcdApp {
         app.render_preview(&context.egui_ctx);
 
         app
+    }
+
+    fn pick_image_file() -> Option<PathBuf> {
+        FileDialog::new()
+            .add_filter("Imagens", &["png", "jpg", "jpeg", "bmp", "webp"])
+            .pick_file()
+    }
+
+    fn add_text_layer(&mut self, context: &egui::Context) {
+        let id = self.scene.add_text(TextLayer::new(
+            0,
+            "Text",
+            LogicalPosition::new(100.0, 100.0),
+            40.0,
+            [255, 255, 255, 255],
+        ));
+
+        self.selected_layer_id = Some(id);
+
+        self.render_preview(context);
+    }
+
+    fn add_image_layer(&mut self, context: &egui::Context) {
+        let Some(path) = Self::pick_image_file() else {
+            return;
+        };
+
+        let mut image = ImageLayer::new(
+            0,
+            path.to_string_lossy().into_owned(),
+            LogicalRect::new(100.0, 100.0, 800.0, 800.0),
+        );
+
+        image.fit = ImageFit::Contain;
+
+        let id = self.scene.add_image(image);
+
+        self.selected_layer_id = Some(id);
+
+        self.render_preview(context);
+    }
+
+    fn replace_selected_image(&mut self, context: &egui::Context) {
+        let Some(id) = self.selected_layer_id else {
+            return;
+        };
+
+        let Some(path) = Self::pick_image_file() else {
+            return;
+        };
+
+        let Some(layer) = self.scene.layer_mut(id) else {
+            return;
+        };
+
+        let Layer::Image(image) = layer else {
+            return;
+        };
+
+        image.source = path.to_string_lossy().into_owned();
+
+        self.render_preview(context);
+    }
+
+    fn remove_selected_layer(&mut self, context: &egui::Context) {
+        let Some(id) = self.selected_layer_id else {
+            return;
+        };
+
+        if self.scene.is_background(id) {
+            return;
+        }
+
+        if !self.scene.remove_layer(id) {
+            return;
+        }
+
+        self.end_drag();
+        self.end_resize();
+
+        self.selected_layer_id = self.scene.layers.last().map(Layer::id);
+
+        self.render_preview(context);
+    }
+
+    fn move_selected_layer_up(&mut self, context: &egui::Context) {
+        let Some(id) = self.selected_layer_id else {
+            return;
+        };
+
+        if self.scene.move_layer_up(id) {
+            self.render_preview(context);
+        }
+    }
+
+    fn move_selected_layer_down(&mut self, context: &egui::Context) {
+        let Some(id) = self.selected_layer_id else {
+            return;
+        };
+
+        if self.scene.move_layer_down(id) {
+            self.render_preview(context);
+        }
     }
 
     fn selected_resize_handle_rect(&self, transform: PreviewTransform) -> Option<Rect> {
@@ -634,6 +731,8 @@ impl OpenLcdApp {
 
         let mut changed = false;
 
+        let mut replace_image = false;
+
         {
             let Some(layer) = self.scene.layer_mut(selected_id) else {
                 ui.label("Layer não encontrada.");
@@ -669,6 +768,19 @@ impl OpenLcdApp {
                 }
 
                 Layer::Image(image) => {
+                    ui.label("Arquivo");
+
+                    let image_name = std::path::Path::new(&image.source)
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(&image.source);
+
+                    ui.label(image_name);
+
+                    if ui.button("Trocar imagem...").clicked() {
+                        replace_image = true;
+                    }
+
                     ui.label("Tipo: Image");
 
                     changed |= ui.checkbox(&mut image.visible, "Visível").changed();
@@ -801,16 +913,40 @@ impl OpenLcdApp {
         if changed {
             self.render_preview(context);
         }
+
+        if replace_image {
+            self.replace_selected_image(context);
+        }
     }
 
-    fn layers_panel(&mut self, ui: &mut egui::Ui) {
+    fn layers_panel(&mut self, ui: &mut egui::Ui, context: &egui::Context) {
         ui.heading("Layers");
 
         ui.small(format!("{} layers", self.scene.layers.len(),));
 
         ui.separator();
 
-        for layer in &self.scene.layers {
+        //
+        // Criate layers
+        //
+
+        ui.horizontal(|ui| {
+            if ui.button("+ Texto").clicked() {
+                self.add_text_layer(context);
+            }
+
+            if ui.button("+ Imagem").clicked() {
+                self.add_image_layer(context);
+            }
+        });
+
+        ui.separator();
+
+        //
+        // List
+        //
+
+        for layer in self.scene.layers.iter().rev() {
             let id = layer.id();
 
             let selected = self.selected_layer_id == Some(id);
@@ -823,6 +959,44 @@ impl OpenLcdApp {
                 self.selected_layer_id = Some(id);
             }
         }
+
+        ui.separator();
+
+        //
+        // Z-order
+        //
+
+        ui.horizontal(|ui| {
+            let selected = self.selected_layer_id.is_some();
+
+            if ui
+                .add_enabled(selected, egui::Button::new("Up"))
+                .on_hover_text("Move layer to up")
+                .clicked()
+            {
+                self.move_selected_layer_up(context);
+            }
+
+            if ui
+                .add_enabled(selected, egui::Button::new("Down"))
+                .on_hover_text("Move layer to down")
+                .clicked()
+            {
+                self.move_selected_layer_down(context);
+            }
+
+            let removable = self
+                .selected_layer_id
+                .is_some_and(|id| !self.scene.is_background(id));
+
+            if ui
+                .add_enabled(removable, egui::Button::new("Remove"))
+                .on_hover_text("Remove layer")
+                .clicked()
+            {
+                self.remove_selected_layer(context);
+            }
+        });
     }
 
     fn layer_label(&self, layer: &Layer) -> String {
@@ -1063,7 +1237,7 @@ impl OpenLcdApp {
 
         ui.separator();
 
-        self.layers_panel(ui);
+        self.layers_panel(ui, context);
 
         ui.separator();
 
