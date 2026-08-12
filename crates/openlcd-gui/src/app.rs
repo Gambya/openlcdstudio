@@ -16,7 +16,7 @@ use openlcd_fake_driver::FakeDisplay;
 
 use openlcd_render::SceneRenderer;
 
-use openlcd_theme::{ImageFit, ImageLayer, Layer, LayerId, Scene, TextLayer};
+use openlcd_theme::{ImageFit, ImageLayer, Layer, LayerId, Scene, TextLayer, ThemeDocument};
 
 use rfd::FileDialog;
 
@@ -227,6 +227,7 @@ pub struct OpenLcdApp {
     last_render_instant: Option<std::time::Instant>,
 
     scene: Scene,
+    theme_path: Option<PathBuf>,
     cpu_layer_id: LayerId,
     selected_layer_id: Option<LayerId>,
     font: FontArc,
@@ -259,6 +260,7 @@ impl OpenLcdApp {
             texture: None,
 
             scene,
+            theme_path: None,
             cpu_layer_id,
             selected_layer_id: Some(cpu_layer_id),
             font,
@@ -288,6 +290,110 @@ impl OpenLcdApp {
         app.render_preview(&context.egui_ctx);
 
         app
+    }
+
+    fn save_theme_as(&mut self) {
+        let Some(path) = FileDialog::new()
+            .add_filter("OpenLCD Theme", &["json"])
+            .set_file_name("theme.json")
+            .save_file()
+        else {
+            return;
+        };
+
+        let theme = ThemeDocument::new(self.scene.name.clone(), self.scene.clone());
+
+        match theme.save_managed(&path) {
+            Ok(()) => {
+                self.theme_path = Some(path);
+            }
+
+            Err(error) => {
+                eprintln!("Erro ao salvar tema: {error}");
+            }
+        }
+    }
+
+    fn save_theme(&mut self) {
+        let Some(path) = self.theme_path.clone() else {
+            self.save_theme_as();
+            return;
+        };
+
+        let theme = ThemeDocument::new(self.scene.name.clone(), self.scene.clone());
+
+        if let Err(error) = theme.save_managed(path) {
+            eprintln!("Erro ao salvar tema: {error}");
+        }
+    }
+
+    fn open_theme(&mut self, context: &egui::Context) {
+        let Some(path) = FileDialog::new()
+            .add_filter("OpenLCD Theme", &["json"])
+            .pick_file()
+        else {
+            return;
+        };
+
+        let theme = match ThemeDocument::load(&path) {
+            Ok(theme) => theme,
+
+            Err(error) => {
+                eprintln!("Erro ao abrir tema: {error}");
+
+                return;
+            }
+        };
+
+        self.scene = theme.scene;
+
+        self.theme_path = Some(path);
+
+        self.selected_layer_id = self.scene.layers.last().map(Layer::id);
+
+        self.end_drag();
+        self.end_resize();
+
+        // O layer de CPU é especial apenas no protótipo.
+        // Um tema carregado pode não possuir essa layer.
+        if self.scene.layer(self.cpu_layer_id).is_none() {
+            self.cpu_layer_id = 0;
+        }
+
+        self.render_preview(context);
+    }
+
+    fn file_panel(&mut self, ui: &mut egui::Ui, context: &egui::Context) {
+        ui.horizontal(|ui| {
+            if ui.button("Abrir").clicked() {
+                self.open_theme(context);
+            }
+
+            if ui.button("Salvar").clicked() {
+                self.save_theme();
+            }
+
+            if ui.button("Salvar como...").clicked() {
+                self.save_theme_as();
+            }
+
+            ui.separator();
+
+            match &self.theme_path {
+                Some(path) => {
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("theme.json");
+
+                    ui.label(name);
+                }
+
+                None => {
+                    ui.label("Tema não salvo");
+                }
+            }
+        });
     }
 
     fn pick_image_file() -> Option<PathBuf> {
@@ -1368,6 +1474,10 @@ impl eframe::App for OpenLcdApp {
         let context = ui.ctx().clone();
 
         self.update_animation(&context);
+
+        egui::Panel::top("file-panel").show(ui, |ui| {
+            self.file_panel(ui, &context);
+        });
 
         egui::Panel::left("device-panel")
             .default_size(280.0)

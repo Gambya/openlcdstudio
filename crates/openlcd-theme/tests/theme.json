@@ -1,0 +1,77 @@
+{
+  "format_version": 1,
+  "name": "OpenLCD Preview",
+  "asset_mode": "external",
+  "scene": {
+    "name": "OpenLCD Preview",
+    "layers": [
+      {
+        "Background": {
+          "id": 1,
+          "visible": true,
+          "color": [
+            255,
+            24,
+            42,
+            255
+          ]
+        }
+      },
+      {
+        "Image": {
+          "id": 4,
+          "visible": true,
+          "source": "/home/ramos/Pictures/wp12287630-dark-world-map-wallpapers.jpg",
+          "rect": {
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "size": {
+              "width": 1000.0,
+              "height": 1000.0
+            }
+          },
+          "fit": "Cover",
+          "opacity": 195
+        }
+      },
+      {
+        "Text": {
+          "id": 5,
+          "visible": true,
+          "text": "TESTE PERSISTENCIA",
+          "position": {
+            "x": 108.65509,
+            "y": 35.36794
+          },
+          "font_size": 20.0,
+          "color": [
+            255,
+            0,
+            0,
+            255
+          ]
+        }
+      },
+      {
+        "Text": {
+          "id": 3,
+          "visible": true,
+          "text": "CPU 61%",
+          "position": {
+            "x": 297.91144,
+            "y": 312.98306
+          },
+          "font_size": 29.807718,
+          "color": [
+            80,
+            220,
+            140,
+            255
+          ]
+        }
+      }
+    ]
+  }
+}

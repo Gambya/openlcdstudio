@@ -1,0 +1,95 @@
+{
+  "format_version": 1,
+  "name": "OpenLCD Preview",
+  "asset_mode": "managed",
+  "scene": {
+    "name": "OpenLCD Preview",
+    "layers": [
+      {
+        "Background": {
+          "id": 1,
+          "visible": true,
+          "color": [
+            255,
+            180,
+            42,
+            255
+          ]
+        }
+      },
+      {
+        "Image": {
+          "id": 4,
+          "visible": true,
+          "source": "assets/image-layer-4.jpg",
+          "rect": {
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "size": {
+              "width": 1000.0,
+              "height": 1000.0
+            }
+          },
+          "fit": "Cover",
+          "opacity": 200
+        }
+      },
+      {
+        "Text": {
+          "id": 2,
+          "visible": true,
+          "text": "OpenLCD Studio",
+          "position": {
+            "x": 32.839478,
+            "y": 19.794731
+          },
+          "font_size": 32.0,
+          "color": [
+            255,
+            145,
+            0,
+            255
+          ]
+        }
+      },
+      {
+        "Text": {
+          "id": 3,
+          "visible": true,
+          "text": "CPU 0%",
+          "position": {
+            "x": 126.43518,
+            "y": 920.5299
+          },
+          "font_size": 46.0,
+          "color": [
+            80,
+            220,
+            140,
+            255
+          ]
+        }
+      },
+      {
+        "Text": {
+          "id": 5,
+          "visible": true,
+          "text": "Teste de texto",
+          "position": {
+            "x": 140.55554,
+            "y": 133.26254
+          },
+          "font_size": 30.0,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ]
+        }
+      }
+    ]
+  }
+}
