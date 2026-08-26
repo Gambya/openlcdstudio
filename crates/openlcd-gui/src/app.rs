@@ -16,9 +16,15 @@ use openlcd_fake_driver::FakeDisplay;
 
 use openlcd_render::SceneRenderer;
 
-use openlcd_theme::{ImageFit, ImageLayer, Layer, LayerId, Scene, TextLayer, ThemeDocument};
+use openlcd_runtime::{RuntimeData, SceneResolver};
+
+use openlcd_theme::{
+    DataBinding, ImageFit, ImageLayer, Layer, LayerId, Scene, TextBinding, TextLayer, ThemeDocument,
+};
 
 use rfd::FileDialog;
+
+use openlcd_monitor::MonitorService;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreviewProfile {
@@ -184,7 +190,7 @@ fn load_default_font() -> FontArc {
     ));
 }
 
-fn create_initial_scene() -> (Scene, LayerId) {
+fn create_initial_scene() -> Scene {
     let mut scene = Scene::new("OpenLCD Preview");
 
     scene.add_background([18, 24, 42, 255]);
@@ -197,15 +203,22 @@ fn create_initial_scene() -> (Scene, LayerId) {
         [255, 255, 255, 255],
     ));
 
-    let cpu_layer_id = scene.add_text(TextLayer::new(
-        0,
-        "CPU 42%",
-        LogicalPosition::new(60.0, 230.0),
-        46.0,
-        [80, 220, 140, 255],
-    ));
+    scene.add_text(
+        TextLayer::new(
+            0,
+            "CPU indisponível",
+            LogicalPosition::new(60.0, 230.0),
+            46.0,
+            [80, 220, 140, 255],
+        )
+        .with_binding(
+            TextBinding::new(DataBinding::CpuUsage)
+                .with_prefix("CPU ")
+                .with_suffix("%"),
+        ),
+    );
 
-    (scene, cpu_layer_id)
+    scene
 }
 
 const RESIZE_HANDLE_SIZE: f32 = 10.0;
@@ -218,7 +231,6 @@ pub struct OpenLcdApp {
     brightness: u8,
     frame_count: u64,
 
-    cpu_usage: f32,
     animate: bool,
     last_frame_time: f64,
 
@@ -228,7 +240,9 @@ pub struct OpenLcdApp {
 
     scene: Scene,
     theme_path: Option<PathBuf>,
-    cpu_layer_id: LayerId,
+    runtime_data: RuntimeData,
+    scene_resolver: SceneResolver,
+    monitor_service: MonitorService,
     selected_layer_id: Option<LayerId>,
     font: FontArc,
     renderer: SceneRenderer,
@@ -250,7 +264,51 @@ impl OpenLcdApp {
         let font = load_default_font();
         let renderer = SceneRenderer::new(selected_profile.size(), font.clone());
 
-        let (scene, cpu_layer_id) = create_initial_scene();
+        let scene = create_initial_scene();
+
+        let monitor_service = MonitorService::start();
+
+        let runtime_data = RuntimeData {
+            cpu_usage: Some(42.0),
+
+            cpu_temperature: Some(54.0),
+
+            cpu_frequency_mhz: Some(4200.0),
+
+            cpu_voltage: Some(1.25),
+
+            gpu_usage: Some(37.0),
+
+            gpu_temperature: Some(61.0),
+
+            gpu_frequency_mhz: Some(2450.0),
+
+            memory_usage: Some(48.0),
+
+            memory_frequency_mhz: Some(3200.0),
+
+            disk_temperature: Some(39.0),
+
+            network_upload_bytes_per_second: Some(125_000.0),
+
+            network_download_bytes_per_second: Some(2_400_000.0),
+
+            clock: Some("13:26".to_owned()),
+
+            date: Some("15/08/2026".to_owned()),
+
+            wifi_state: Some("Connected".to_owned()),
+
+            wifi_name: Some("Wi-Fi".to_owned()),
+
+            wifi_ssid: Some("OpenLCD Test".to_owned()),
+
+            fps: Some(20.0),
+        };
+
+        let scene_resolver = SceneResolver::new();
+
+        let selected_layer_id = scene.layers.last().map(Layer::id);
 
         let mut app = Self {
             selected_profile,
@@ -261,8 +319,10 @@ impl OpenLcdApp {
 
             scene,
             theme_path: None,
-            cpu_layer_id,
-            selected_layer_id: Some(cpu_layer_id),
+            runtime_data,
+            scene_resolver,
+            monitor_service,
+            selected_layer_id: selected_layer_id,
             font,
             renderer,
 
@@ -278,7 +338,6 @@ impl OpenLcdApp {
             brightness: 100,
             frame_count: 0,
 
-            cpu_usage: 42.0,
             animate: true,
             last_frame_time: 0.0,
 
@@ -353,12 +412,6 @@ impl OpenLcdApp {
 
         self.end_drag();
         self.end_resize();
-
-        // O layer de CPU é especial apenas no protótipo.
-        // Um tema carregado pode não possuir essa layer.
-        if self.scene.layer(self.cpu_layer_id).is_none() {
-            self.cpu_layer_id = 0;
-        }
 
         self.render_preview(context);
     }
@@ -833,11 +886,11 @@ impl OpenLcdApp {
 
         ui.separator();
 
-        let is_cpu_layer = selected_id == self.cpu_layer_id;
-
         let mut changed = false;
 
         let mut replace_image = false;
+
+        let mut binding_changed = false;
 
         {
             let Some(layer) = self.scene.layer_mut(selected_id) else {
@@ -965,17 +1018,101 @@ impl OpenLcdApp {
 
                     ui.separator();
 
-                    if is_cpu_layer {
-                        ui.label("Conteúdo: dinâmico");
+                    //
+                    // Content type
+                    //
 
-                        ui.label(format!("Valor atual: {}", text.text,));
-                    } else {
-                        ui.label("Texto");
+                    ui.label("Conteúdo");
 
-                        changed |= ui.text_edit_singleline(&mut text.text).changed();
+                    let mut dynamic = text.binding.is_some();
+
+                    if ui.radio_value(&mut dynamic, false, "Estático").changed() {
+                        if !dynamic {
+                            text.binding = None;
+                            changed = true;
+                        }
+                    }
+
+                    if ui.radio_value(&mut dynamic, true, "Binding").changed() {
+                        if dynamic && text.binding.is_none() {
+                            text.binding = Some(TextBinding::new(DataBinding::CpuUsage));
+
+                            changed = true;
+                        }
                     }
 
                     ui.separator();
+
+                    //
+                    // Static text / fallback
+                    //
+
+                    if text.binding.is_none() {
+                        ui.label("Texto");
+
+                        changed |= ui.text_edit_singleline(&mut text.text).changed();
+                    } else {
+                        ui.label("Texto fallback");
+
+                        changed |= ui.text_edit_singleline(&mut text.text).changed();
+
+                        ui.small("Usado quando o dado não estiver disponível.");
+                    }
+
+                    //
+                    // Binding configuration
+                    //
+
+                    if let Some(binding) = &mut text.binding {
+                        ui.separator();
+
+                        ui.label("Fonte de dados");
+
+                        egui::ComboBox::from_id_salt(format!("binding-source-{}", text.id,))
+                            .selected_text(binding.source.label())
+                            .show_ui(ui, |ui| {
+                                for source in DataBinding::ALL {
+                                    binding_changed |= ui
+                                        .selectable_value(
+                                            &mut binding.source,
+                                            source,
+                                            source.label(),
+                                        )
+                                        .changed();
+                                }
+                            });
+
+                        ui.separator();
+
+                        ui.label("Formatação");
+
+                        binding_changed |= ui
+                            .text_edit_singleline(&mut binding.prefix)
+                            .on_hover_text("Texto antes do valor")
+                            .changed();
+
+                        ui.horizontal(|ui| {
+                            ui.label("Prefix");
+
+                            binding_changed |=
+                                ui.text_edit_singleline(&mut binding.prefix).changed();
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Suffix");
+
+                            binding_changed |=
+                                ui.text_edit_singleline(&mut binding.suffix).changed();
+                        });
+                    }
+
+                    changed |= binding_changed;
+
+                    ui.separator();
+
+                    //
+                    // Position
+                    //
 
                     ui.label("Posição lógica");
 
@@ -1118,10 +1255,12 @@ impl OpenLcdApp {
                 format!("Image: {name}")
             }
 
-            Layer::Text(text) if text.id == self.cpu_layer_id => "CPU Usage".to_owned(),
-
             Layer::Text(text) => {
-                format!("Text: {}", text.text)
+                if let Some(binding) = &text.binding {
+                    format!("Data: {}", binding.source.label(),)
+                } else {
+                    format!("Text: {}", text.text,)
+                }
             }
         }
     }
@@ -1143,18 +1282,6 @@ impl OpenLcdApp {
         self.render_preview(context);
     }
 
-    fn update_scene_values(&mut self) {
-        let Some(layer) = self.scene.layer_mut(self.cpu_layer_id) else {
-            return;
-        };
-
-        let Layer::Text(text) = layer else {
-            return;
-        };
-
-        text.text = format!("CPU {:.0}%", self.cpu_usage,);
-    }
-
     fn update_animation(&mut self, context: &egui::Context) {
         if !self.animate {
             return;
@@ -1171,7 +1298,7 @@ impl OpenLcdApp {
 
         self.last_frame_time = current_time;
 
-        self.cpu_usage = ((current_time as f32 * 1.5).sin() * 0.5 + 0.5) * 100.0;
+        self.runtime_data.fps = Some(self.actual_fps);
 
         self.render_preview(context);
 
@@ -1198,13 +1325,13 @@ impl OpenLcdApp {
     fn render_preview(&mut self, context: &egui::Context) {
         let render_started = Instant::now();
 
-        self.update_scene_values();
+        let resolved_scene = self.scene_resolver.resolve(&self.scene, &self.runtime_data);
 
-        let frame = match self.renderer.render(&self.scene) {
+        let frame = match self.renderer.render(&resolved_scene) {
             Ok(frame) => frame,
 
             Err(error) => {
-                eprintln!("Erro ao renderizar Scene: {error}");
+                eprintln!("error rendering scene: {error}");
 
                 return;
             }
@@ -1299,8 +1426,6 @@ impl OpenLcdApp {
         ui.separator();
 
         ui.checkbox(&mut self.animate, "Animar preview");
-
-        ui.add(egui::Slider::new(&mut self.cpu_usage, 0.0..=100.0).text("CPU simulada"));
 
         if ui
             .add(egui::Slider::new(&mut self.brightness, 0..=100).text("Brilho fake"))
@@ -1467,11 +1592,27 @@ impl OpenLcdApp {
                 });
             });
     }
+
+    fn update_monitor_data(&mut self) {
+        let Some(mut data) = self.monitor_service.latest() else {
+            return;
+        };
+
+        //
+        // FPS belongs to OpenLCD Studio itself,
+        // not to the system monitor.
+        //
+        data.fps = Some(self.actual_fps);
+
+        self.runtime_data = data;
+    }
 }
 
 impl eframe::App for OpenLcdApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let context = ui.ctx().clone();
+
+        self.update_monitor_data();
 
         self.update_animation(&context);
 

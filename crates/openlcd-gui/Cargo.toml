@@ -12,6 +12,8 @@ openlcd-driver = { path = "../openlcd-driver" }
 openlcd-fake-driver = { path = "../openlcd-fake-driver" }
 openlcd-render = { path = "../openlcd-render" }
 openlcd-theme = { path = "../openlcd-theme" }
+openlcd-runtime = { path = "../openlcd-runtime" }
+openlcd-monitor = { path = "../openlcd-monitor" }
 
 thiserror = "2"
 rfd = "0.17.2"
