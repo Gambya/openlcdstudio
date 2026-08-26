@@ -1,3 +1,5 @@
+use crate::TextBinding;
+
 use openlcd_core::{LogicalPosition, LogicalRect};
 
 use serde::{Deserialize, Serialize};
@@ -100,7 +102,21 @@ pub struct TextLayer {
     pub id: LayerId,
     pub visible: bool,
 
+    /// Persistent layer text.
+    ///
+    /// When `binding` is None, this is the
+    /// effective text rendered.
+    ///
+    /// When a binding exists, it serves as a
+    /// fallback if the data is unavailable.
     pub text: String,
+
+    /// Optional dynamic font.
+    ///
+    /// `serde(default)` maintains compatibility with
+    /// M9 themes that do not yet have this field.
+    #[serde(default)]
+    pub binding: Option<TextBinding>,
 
     pub position: LogicalPosition,
 
@@ -121,10 +137,20 @@ impl TextLayer {
             id,
             visible: true,
             text: text.into(),
+            binding: None,
             position,
             font_size,
             color,
         }
+    }
+
+    pub fn with_binding(mut self, binding: TextBinding) -> Self {
+        self.binding = Some(binding);
+        self
+    }
+
+    pub fn clear_binding(&mut self) {
+        self.binding = None;
     }
 
     pub fn logical_bounds(&self) -> LogicalRect {

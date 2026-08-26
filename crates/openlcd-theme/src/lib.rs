@@ -1,6 +1,9 @@
+pub mod binding;
 pub mod layer;
 pub mod scene;
 pub mod theme;
+
+pub use binding::{DataBinding, TextBinding};
 
 pub use layer::{BackgroundLayer, ImageFit, ImageLayer, Layer, LayerId, TextLayer};
 

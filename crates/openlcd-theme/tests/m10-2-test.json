@@ -1,0 +1,175 @@
+{
+  "format_version": 1,
+  "name": "OpenLCD Preview",
+  "asset_mode": "managed",
+  "scene": {
+    "name": "OpenLCD Preview",
+    "layers": [
+      {
+        "Background": {
+          "id": 1,
+          "visible": true,
+          "color": [
+            18,
+            24,
+            42,
+            255
+          ]
+        }
+      },
+      {
+        "Text": {
+          "id": 2,
+          "visible": true,
+          "text": "OpenLCD Studio",
+          "binding": null,
+          "position": {
+            "x": 60.0,
+            "y": 80.0
+          },
+          "font_size": 32.0,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ]
+        }
+      },
+      {
+        "Text": {
+          "id": 3,
+          "visible": true,
+          "text": "CPU indisponível",
+          "binding": {
+            "source": "cpu_usage",
+            "prefix": "CPU ",
+            "suffix": "%",
+            "precision": 0
+          },
+          "position": {
+            "x": 60.0,
+            "y": 230.0
+          },
+          "font_size": 46.0,
+          "color": [
+            80,
+            220,
+            140,
+            255
+          ]
+        }
+      },
+      {
+        "Text": {
+          "id": 4,
+          "visible": true,
+          "text": "CPU temp indisponível",
+          "binding": {
+            "source": "cpu_temperature",
+            "prefix": "CPU ",
+            "suffix": "°C",
+            "precision": 0
+          },
+          "position": {
+            "x": 10.0,
+            "y": 409.3305
+          },
+          "font_size": 20.0,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ]
+        }
+      },
+      {
+        "Text": {
+          "id": 5,
+          "visible": true,
+          "text": "GPU Usage indisponível",
+          "binding": {
+            "source": "gpu_usage",
+            "prefix": "GPU ",
+            "suffix": "%",
+            "precision": 0
+          },
+          "position": {
+            "x": 104.05528,
+            "y": 486.4417
+          },
+          "font_size": 40.0,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ]
+        }
+      },
+      {
+        "Text": {
+          "id": 6,
+          "visible": true,
+          "text": "Meu PC",
+          "binding": null,
+          "position": {
+            "x": 0.0,
+            "y": 553.101
+          },
+          "font_size": 22.0,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ]
+        }
+      },
+      {
+        "Text": {
+          "id": 7,
+          "visible": true,
+          "text": "Clock indisponível",
+          "binding": {
+            "source": "clock",
+            "prefix": "",
+            "suffix": "",
+            "precision": 0
+          },
+          "position": {
+            "x": 77.02011,
+            "y": 658.09985
+          },
+          "font_size": 40.0,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ]
+        }
+      },
+      {
+        "Text": {
+          "id": 8,
+          "visible": true,
+          "text": "Disk Usage Not Found",
+          "binding": null,
+          "position": {
+            "x": 15.953247,
+            "y": 770.80286
+          },
+          "font_size": 22.0,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ]
+        }
+      }
+    ]
+  }
+}
