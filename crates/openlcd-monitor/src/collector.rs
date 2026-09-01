@@ -6,9 +6,12 @@ use openlcd_runtime::RuntimeData;
 
 use sysinfo::{Networks, System};
 
+use crate::HwmonSensors;
+
 pub struct SystemCollector {
     system: System,
     networks: Networks,
+    hwmon: HwmonSensors,
 
     last_network_refresh: Instant,
 
@@ -21,6 +24,8 @@ impl SystemCollector {
             system: System::new_all(),
 
             networks: Networks::new_with_refreshed_list(),
+
+            hwmon: HwmonSensors::discover(),
 
             last_network_refresh: Instant::now(),
 
@@ -57,6 +62,10 @@ impl SystemCollector {
 
         self.initialized = true;
 
+        let cpu_temperature = self.hwmon.cpu_temperature();
+
+        let disk_temperature = self.hwmon.disk_temperature();
+
         RuntimeData {
             cpu_usage,
 
@@ -73,9 +82,9 @@ impl SystemCollector {
             date: Some(local_time.format("%d/%m/%Y").to_string()),
 
             //
-            // Ainda não implementados nesta fase.
+            // Not yet implemented in this phase.
             //
-            cpu_temperature: None,
+            cpu_temperature,
             cpu_voltage: None,
 
             gpu_usage: None,
@@ -84,7 +93,7 @@ impl SystemCollector {
 
             memory_frequency_mhz: None,
 
-            disk_temperature: None,
+            disk_temperature,
 
             wifi_state: None,
             wifi_name: None,
